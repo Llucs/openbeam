@@ -1,0 +1,45 @@
+name: Android CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      buildType:
+        description: 'Select build type'
+        required: true
+        default: 'Debug'
+        type: choice
+        options:
+          - Debug
+          - Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.gradle/caches
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build
+        run: ./gradlew app:assemble${{ github.event.inputs.buildType }}
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: OpenBeam-${{ github.event.inputs.buildType }}
+          path: app/build/outputs/apk/${{ github.event.inputs.buildType | toLowerCase }}/
