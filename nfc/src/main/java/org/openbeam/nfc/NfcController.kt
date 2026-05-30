@@ -1,12 +1,13 @@
 package org.openbeam.nfc
 
 import android.app.Activity
-import android.nfc.Ndef
 import android.nfc.NdefMessage
 import android.nfc.NfcAdapter
 import android.nfc.NfcAdapter.ReaderCallback
+import android.nfc.tech.Ndef
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import org.openbeam.core.SessionToken
 
 class NfcController(private val activity: Activity) {
@@ -15,18 +16,32 @@ class NfcController(private val activity: Activity) {
 
     fun enableWrite(token: SessionToken) {
         val ndef = TokenExchange.createNdef(token)
-        adapter?.setNdefPushMessage(ndef, activity)
+        try {
+            val method = NfcAdapter::class.java.getMethod(
+                "setNdefPushMessage", NdefMessage::class.java, Activity::class.java
+            )
+            method.invoke(adapter, ndef, activity)
+        } catch (e: Exception) {
+            Log.w("NfcController", "NFC push not supported", e)
+        }
     }
 
     fun disableWrite() {
-        adapter?.setNdefPushMessage(null, activity)
+        try {
+            val method = NfcAdapter::class.java.getMethod(
+                "setNdefPushMessage", NdefMessage::class.java, Activity::class.java
+            )
+            method.invoke(adapter, null, activity)
+        } catch (e: Exception) {
+            Log.w("NfcController", "NFC push not supported", e)
+        }
     }
 
     fun enableRead(onTokenReceived: (SessionToken) -> Unit) {
         if (adapter == null) return
         readCallback = ReaderCallback { tag ->
             try {
-                val ndef = android.nfc.Ndef.get(tag) ?: return@ReaderCallback
+                val ndef = Ndef.get(tag) ?: return@ReaderCallback
                 ndef.connect()
                 val message = ndef.ndefMessage ?: return@ReaderCallback
                 ndef.close()

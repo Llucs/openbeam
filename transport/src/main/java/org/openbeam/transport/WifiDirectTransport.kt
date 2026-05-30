@@ -9,7 +9,6 @@ import android.net.wifi.p2p.WifiP2pConfig
 import android.net.wifi.p2p.WifiP2pDevice
 import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pManager
-import android.net.wifi.p2p.WpsInfo
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -52,7 +51,7 @@ class WifiDirectTransport(private val context: Context) {
                     WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> {
                         val state = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1)
                         if (state != WifiP2pManager.WIFI_P2P_STATE_ENABLED) {
-                            Log.w("WifiDirectTransport", "Wi‑Fi Direct is disabled")
+                            Log.w("WifiDirectTransport", "Wi-Fi Direct is disabled")
                         }
                     }
                     WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> {
@@ -66,7 +65,6 @@ class WifiDirectTransport(private val context: Context) {
                         }
                     }
                     WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION -> {
-                        // Do nothing special
                     }
                 }
             }
@@ -96,10 +94,7 @@ class WifiDirectTransport(private val context: Context) {
     }
 
     fun connect(device: WifiP2pDevice) {
-        val config = WifiP2pConfig().apply {
-            deviceAddress = device.deviceAddress
-            wps.setup = WpsInfo.PBC
-        }
+        val config = createWifiConfig(device)
         manager.connect(channel, config, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
                 Log.d("WifiDirectTransport", "Connection initiated")
@@ -119,6 +114,25 @@ class WifiDirectTransport(private val context: Context) {
                 Log.e("WifiDirectTransport", "Group creation failed: $reason")
             }
         })
+    }
+
+    private fun createWifiConfig(device: WifiP2pDevice): WifiP2pConfig {
+        return try {
+            val builderClass = Class.forName("android.net.wifi.p2p.WifiP2pConfig\$Builder")
+            val builder = builderClass.getConstructor().newInstance()
+            builderClass.getMethod("setDeviceAddress", String::class.java).invoke(builder, device.deviceAddress)
+            builderClass.getMethod("build").invoke(builder) as WifiP2pConfig
+        } catch (e: Exception) {
+            val config = WifiP2pConfig()
+            try {
+                val field = WifiP2pConfig::class.java.getField("deviceAddress")
+                field.set(config, device.deviceAddress)
+                val wpsField = WifiP2pConfig::class.java.getField("wps")
+                val wps = wpsField.get(config)
+                wps::class.java.getField("setup").setInt(wps, 0)
+            } catch (ignored: Exception) {}
+            config
+        }
     }
 
     suspend fun transfer(
@@ -199,37 +213,28 @@ class WifiDirectTransport(private val context: Context) {
         updateProgress: (Long, Long) -> Unit
     ) {
         try {
-            // Handshake
             val handshake = HandshakeManager.createHandshakeMessage(token, metadata)
             val handshakeLength = handshake.size
             output.write(intToByteArray(handshakeLength))
             output.write(handshake)
 
-            // Send number of files as 4 bytes
             output.write(intToByteArray(files.size))
 
             var bytesTransferred = 0L
             val totalSize = metadata.size
-            // For each URI, open InputStream and send data
             files.forEach { uri ->
                 val name = getFileNameFromUri(uri)
                 val fileSize = getFileSizeFromUri(uri)
-                // Write name length and name
                 val nameBytes = name.toByteArray(Charsets.UTF_8)
                 output.write(intToByteArray(nameBytes.size))
                 output.write(nameBytes)
-                // Write file size
                 output.write(longToByteArray(fileSize))
-
-                // Copy file bytes
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     val buffer = ByteArray(8192)
                     var read: Int
-                    var localTransferred = 0L
                     while (input.read(buffer).also { read = it } != -1) {
                         output.write(buffer, 0, read)
                         bytesTransferred += read
-                        localTransferred += read
                         updateProgress(bytesTransferred, totalSize)
                     }
                 }
@@ -248,33 +253,27 @@ class WifiDirectTransport(private val context: Context) {
         var totalBytes = 0L
         val metadata: TransferMetadata
         try {
-            // Read handshake length (4 bytes)
             val lengthBytes = ByteArray(4)
             input.readFully(lengthBytes)
             val handshakeLength = byteArrayToInt(lengthBytes)
             val handshakeBytes = ByteArray(handshakeLength)
             input.readFully(handshakeBytes)
-            // Parse handshake
             metadata = HandshakeManager.parseHandshakeMessage(token, handshakeBytes)
-            // Read number of files
             val countBytes = ByteArray(4)
             input.readFully(countBytes)
             val fileCount = byteArrayToInt(countBytes)
             var bytesReceived = 0L
             val totalSize = metadata.size
             for (i in 0 until fileCount) {
-                // Read file name length and name
                 val nameLenBytes = ByteArray(4)
                 input.readFully(nameLenBytes)
                 val nameLen = byteArrayToInt(nameLenBytes)
                 val nameBytes = ByteArray(nameLen)
                 input.readFully(nameBytes)
                 val name = String(nameBytes, Charsets.UTF_8)
-                // Read file size
                 val sizeBytes = ByteArray(8)
                 input.readFully(sizeBytes)
                 val fileSize = byteArrayToLong(sizeBytes)
-                // Create output file
                 val destDir: File? = context.getExternalFilesDir(null)
                 val outFile = File(destDir, name)
                 outFile.outputStream().use { outputStream ->
@@ -290,7 +289,7 @@ class WifiDirectTransport(private val context: Context) {
                     }
                 }
             }
-            totalBytes = metadata.size
+            totalBytes = bytesReceived
         } catch (e: Exception) {
             Log.e("WifiDirectTransport", "Error receiving data", e)
             throw e
