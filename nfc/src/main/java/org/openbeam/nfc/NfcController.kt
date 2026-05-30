@@ -1,6 +1,8 @@
 package org.openbeam.nfc
 
 import android.app.Activity
+import android.nfc.Ndef
+import android.nfc.NdefMessage
 import android.nfc.NfcAdapter
 import android.nfc.NfcAdapter.ReaderCallback
 import android.os.Build
