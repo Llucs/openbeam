@@ -74,10 +74,23 @@ fun OpenBeamApp(
     NavHost(navController = navController, startDestination = startDest) {
         composable("home") { HomeScreen(navController) }
         composable("send") {
-            SendScreen(navController, transportManager, nfcController, sharedUris)
+            SendScreen(
+                navController = navController,
+                transportManager = transportManager,
+                nfcController = nfcController,
+                preSelectedUris = sharedUris,
+                onStartService = onStartService,
+                onStopService = onStopService
+            )
         }
         composable("receive") {
-            ReceiveScreen(navController, transportManager, nfcController)
+            ReceiveScreen(
+                navController = navController,
+                transportManager = transportManager,
+                nfcController = nfcController,
+                onStartService = onStartService,
+                onStopService = onStopService
+            )
         }
         composable("history") { HistoryScreen(navController) }
         composable("settings") { SettingsScreen(navController) }
@@ -174,7 +187,9 @@ fun SendScreen(
     navController: NavHostController,
     transportManager: org.openbeam.transport.TransportManager,
     nfcController: org.openbeam.nfc.NfcController,
-    preSelectedUris: List<Uri> = emptyList()
+    preSelectedUris: List<Uri> = emptyList(),
+    onStartService: () -> Unit = {},
+    onStopService: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val historyRepo = remember { HistoryRepository.getInstance(context) }
@@ -485,7 +500,9 @@ fun SendScreen(
 fun ReceiveScreen(
     navController: NavHostController,
     transportManager: org.openbeam.transport.TransportManager,
-    nfcController: org.openbeam.nfc.NfcController
+    nfcController: org.openbeam.nfc.NfcController,
+    onStartService: () -> Unit = {},
+    onStopService: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val historyRepo = remember { HistoryRepository.getInstance(context) }
