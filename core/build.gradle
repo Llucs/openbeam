@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace "org.openbeam.core"
-    compileSdk 34
+    compileSdk 33
 
     defaultConfig {
         minSdk 26
