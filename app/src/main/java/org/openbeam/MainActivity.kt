@@ -2,32 +2,29 @@ package org.openbeam
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.viewModels
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.core.content.ContextCompat
 import org.openbeam.ui.OpenBeamApp
 
-/**
- * Entry point of the OpenBeam application. This activity simply hosts the Compose navigation
- * and handles runtime permission requests.
- */
 class MainActivity : ComponentActivity() {
     private lateinit var transportManager: org.openbeam.transport.TransportManager
     private lateinit var nfcController: org.openbeam.nfc.NfcController
 
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Initialize managers
         transportManager = org.openbeam.transport.TransportManager(this)
         nfcController = org.openbeam.nfc.NfcController(this)
-        // Request required permissions on start.
         requestPermissions()
-        // Register broadcast receivers
         transportManager.registerReceivers()
         setContent {
             MaterialTheme {
@@ -49,23 +46,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestPermissions() {
-        val permissions = listOf(
+        val permissions = mutableListOf(
             Manifest.permission.NFC,
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.BLUETOOTH_SCAN,
-            Manifest.permission.BLUETOOTH_ADVERTISE,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.READ_EXTERNAL_STORAGE,
-            Manifest.permission.WRITE_EXTERNAL_STORAGE,
             Manifest.permission.ACCESS_WIFI_STATE,
             Manifest.permission.CHANGE_WIFI_STATE,
             Manifest.permission.INTERNET
-        ).filter {
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
+            permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        val needed = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }.toTypedArray()
-        if (permissions.isNotEmpty()) {
-            val launcher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
-            launcher.launch(permissions)
+        if (needed.isNotEmpty()) {
+            permissionLauncher.launch(needed)
         }
     }
 }
