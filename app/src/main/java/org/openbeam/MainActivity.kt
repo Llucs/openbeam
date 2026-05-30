@@ -2,7 +2,6 @@ package org.openbeam
 
 import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -33,9 +32,18 @@ class MainActivity : ComponentActivity() {
                 OpenBeamApp(
                     transportManager = transportManager,
                     nfcController = nfcController,
-                    sharedUris = sharedUris
+                    sharedUris = sharedUris,
+                    onStartService = { TransferService.start(this@MainActivity) },
+                    onStopService = { TransferService.stop(this@MainActivity) }
                 )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+    }
         }
     }
 

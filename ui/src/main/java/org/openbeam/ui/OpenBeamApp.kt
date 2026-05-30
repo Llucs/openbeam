@@ -50,7 +50,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
-import org.openbeam.TransferService
 import org.openbeam.core.SessionToken
 import org.openbeam.core.TransferMetadata
 import org.openbeam.core.TransferType
@@ -66,7 +65,9 @@ import java.util.Locale
 fun OpenBeamApp(
     transportManager: org.openbeam.transport.TransportManager,
     nfcController: org.openbeam.nfc.NfcController,
-    sharedUris: List<Uri> = emptyList()
+    sharedUris: List<Uri> = emptyList(),
+    onStartService: () -> Unit = {},
+    onStopService: () -> Unit = {}
 ) {
     val navController = rememberNavController()
     val startDest = if (sharedUris.isNotEmpty()) "send" else "home"
@@ -366,7 +367,7 @@ fun SendScreen(
                         ElevatedCard(
                             onClick = {
                                 transportManager.connectWifi(device)
-                                TransferService.start(context)
+                                onStartService()
                                 coroutineScope.launch {
                                     isTransferring = true
                                     transportManager.transfer(
@@ -381,7 +382,7 @@ fun SendScreen(
                                         totalBytes = total
                                     }
                                     isTransferring = false
-                                    TransferService.stop(context)
+                                    onStopService()
                                     nfcController.disableWrite()
                                     selectedUris = emptyList()
                                     metadata = null
@@ -424,7 +425,7 @@ fun SendScreen(
                             onClick = {
                                 val btToken = tk.copy(params = tk.params + ("transport" to "bluetooth"))
                                 token = btToken
-                                TransferService.start(context)
+                                onStartService()
                                 coroutineScope.launch {
                                     isTransferring = true
                                     transportManager.bluetooth.connect(
@@ -440,7 +441,7 @@ fun SendScreen(
                                         totalBytes = total
                                     }
                                     isTransferring = false
-                                    TransferService.stop(context)
+                                    onStopService()
                                     nfcController.disableWrite()
                                     selectedUris = emptyList()
                                     metadata = null
@@ -549,7 +550,7 @@ fun ReceiveScreen(
                 )
                 LaunchedEffect(tokenReceived) {
                     transportManager.createWifiGroup()
-                    TransferService.start(context)
+                    onStartService()
                     isReceiving = true
                     transportManager.transfer(
                         role = WifiDirectTransport.Role.RECEIVER,
@@ -561,7 +562,7 @@ fun ReceiveScreen(
                         progress = if (total > 0) transferred.toFloat() / total else 0f
                     }
                     isReceiving = false
-                    TransferService.stop(context)
+                    onStopService()
                     tokenReceived = null
                 }
                 if (isReceiving) {
