@@ -2,21 +2,11 @@ package org.openbeam.nfc
 
 import android.nfc.NdefMessage
 import android.nfc.NdefRecord
-import android.nfc.NfcAdapter
-import android.nfc.NfcEvent
-import android.util.Base64
 import org.json.JSONObject
 import org.openbeam.core.SessionToken
 import org.openbeam.core.TransferType
 
-/**
- * Provides utilities to wrap and unwrap [SessionToken]s into NFC NDEF messages. The token is
- * serialised as JSON and encoded in UTF‑8. Binary fields (e.g., keys) remain base64 encoded.
- */
 object TokenExchange {
-    /**
-     * Creates an NDEF message from a session token.
-     */
     fun createNdef(token: SessionToken): NdefMessage {
         val json = JSONObject().apply {
             put("id", token.id)
@@ -29,10 +19,6 @@ object TokenExchange {
         return NdefMessage(arrayOf(record))
     }
 
-    /**
-     * Parses an NDEF message into a session token. Returns null if the message is not in
-     * the expected format.
-     */
     fun parseNdef(message: NdefMessage): SessionToken? {
         val record = message.records.firstOrNull() ?: return null
         return try {

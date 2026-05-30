@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.Button
 import androidx.compose.material.Text
@@ -19,8 +20,6 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.openbeam.core.SessionToken
 import org.openbeam.core.TransferMetadata
@@ -28,11 +27,9 @@ import org.openbeam.core.TransferType
 import org.openbeam.core.history.HistoryRepository
 import org.openbeam.transport.WifiDirectTransport
 import org.openbeam.transport.BluetoothTransport
+import java.text.SimpleDateFormat
+import java.util.Date
 
-/**
- * Entry point composable for the UI layer. Sets up a navigation host and provides screens for
- * sending, receiving, and viewing history.
- */
 @Composable
 fun OpenBeamApp(
     transportManager: org.openbeam.transport.TransportManager,
@@ -71,9 +68,6 @@ fun HomeScreen(navController: NavHostController) {
     }
 }
 
-/**
- * Screen for sending files. Allows selection of a file and initiates the NFC handshake.
- */
 @Composable
 fun SendScreen(
     navController: NavHostController,
@@ -81,22 +75,18 @@ fun SendScreen(
     nfcController: org.openbeam.nfc.NfcController
 ) {
     val context = LocalContext.current
-    val historyRepo = remember { org.openbeam.core.history.HistoryRepository.getInstance(context) }
+    val historyRepo = remember { HistoryRepository.getInstance(context) }
     var selectedUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var metadata by remember { mutableStateOf<TransferMetadata?>(null) }
     var token by remember { mutableStateOf<SessionToken?>(null) }
-    // Track whether a transfer is ongoing and the current progress ratio
     var isTransferring by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf(0f) }
 
-    // Observe lists of discovered peers. These StateFlows emit changes as discovery progresses.
     val wifiPeers by transportManager.wifiPeers.collectAsState()
     val bluetoothDevices by transportManager.bluetoothDevices.collectAsState()
 
-    // Use a remembered coroutine scope tied to the composition to launch asynchronous work.
     val coroutineScope = rememberCoroutineScope()
 
-    // File picker launcher
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
         onResult = { uris ->
@@ -105,7 +95,6 @@ fun SendScreen(
                 val names = uris.map { uri -> getFileName(context, uri) }
                 val totalSize = uris.sumOf { uri -> getFileSize(context, uri) }
                 val displayName = if (uris.size == 1) names.first() else "${uris.size} arquivos"
-                val type = if (uris.size == 1) TransferType.FILE else TransferType.MULTIPLE_FILES
                 metadata = TransferMetadata(name = displayName, size = totalSize, uris = uris)
                 token = null
             }
@@ -132,56 +121,46 @@ fun SendScreen(
             }
         }
         metadata?.let { md ->
-            // Generate a new session token and enable NFC push when the user is ready.
             Button(onClick = {
-                val params = mutableMapOf<String, String>()
-                params["transport"] = "wifi" // default transport
+                val params = mutableMapOf("transport" to "wifi")
                 val newToken = SessionToken.generate(
                     if (md.uris.size > 1) TransferType.MULTIPLE_FILES else TransferType.FILE,
                     params
                 )
                 token = newToken
-                // Provide the token via NFC so the receiver knows the session parameters.
                 nfcController.enableWrite(newToken)
             }) {
                 Text("Gerar Token NFC")
             }
         }
         token?.let { tk ->
-            // Inform the user that the token has been generated and to tap devices.
+            val currentMetadata = metadata
+            val currentFiles = selectedUris
             Text("Token gerado:\n${tk.id}\nEncoste o dispositivo receptor.")
-            // Discovery and connection controls appear only when a token exists and no transfer is running.
             if (!isTransferring) {
                 Button(onClick = {
-                    // Begin Wi‑Fi Direct peer discovery. Results will populate wifiPeers.
                     transportManager.discoverWifiPeers()
                 }) {
-                    Text("Buscar dispositivos Wi‑Fi Direct")
+                    Text("Buscar dispositivos Wi-Fi Direct")
                 }
-                // List discovered Wi‑Fi peers and allow the user to select one to connect and send.
                 if (wifiPeers.isNotEmpty()) {
                     Text("Toque em um dispositivo para conectar e enviar:")
                     wifiPeers.forEach { device ->
                         Button(
                             onClick = {
-                                // Immediately connect and start the transfer. The underlying transport
-                                // waits for connection info internally.
                                 transportManager.connectWifi(device)
-                                // Launch the transfer in a coroutine so that the UI remains responsive.
                                 coroutineScope.launch {
                                     isTransferring = true
-                                    // Start sending via Wi‑Fi Direct using the generated token and metadata.
                                     transportManager.transfer(
                                         role = WifiDirectTransport.Role.SENDER,
                                         token = tk,
-                                        metadata = metadata,
-                                        files = selectedUris,
+                                        metadata = currentMetadata,
+                                        files = currentFiles,
                                         historyRepository = historyRepo
                                     ) { transferred, total ->
                                         progress = if (total > 0) transferred.toFloat() / total else 0f
                                     }
                                     isTransferring = false
-                                    // After completion reset state and disable NFC push
                                     nfcController.disableWrite()
                                     selectedUris = emptyList()
                                     metadata = null
@@ -194,24 +173,21 @@ fun SendScreen(
                         }
                     }
                 }
-                // Show Bluetooth devices for fallback if any discovered.
                 if (bluetoothDevices.isNotEmpty()) {
                     Text("Dispositivos Bluetooth disponíveis (fallback):")
                     bluetoothDevices.forEach { device ->
                         Button(
                             onClick = {
-                                // Switch to Bluetooth transport by updating the token parameter.
                                 val btToken = tk.copy(params = tk.params + ("transport" to "bluetooth"))
                                 token = btToken
-                                // Launch transfer over Bluetooth
                                 coroutineScope.launch {
                                     isTransferring = true
                                     transportManager.bluetooth.connect(
                                         device = device,
                                         role = BluetoothTransport.Role.SENDER,
                                         token = btToken,
-                                        metadata = metadata,
-                                        files = selectedUris,
+                                        metadata = currentMetadata,
+                                        files = currentFiles,
                                         historyRepository = historyRepo
                                     ) { transferred, total ->
                                         progress = if (total > 0) transferred.toFloat() / total else 0f
@@ -231,21 +207,15 @@ fun SendScreen(
                 }
             }
         }
-        // Display progress when a transfer is in progress.
         if (isTransferring) {
             Text("Transferindo... ${(progress * 100).toInt()}%")
         }
-        // Always include a back button to return to the home screen.
         Button(onClick = { navController.popBackStack() }) {
             Text("Voltar")
         }
     }
 }
 
-/**
- * Screen for receiving a file. Waits for an NFC token and then establishes a transport channel
- * to receive the data. In this simplified implementation, we just display a message.
- */
 @Composable
 fun ReceiveScreen(
     navController: NavHostController,
@@ -253,13 +223,11 @@ fun ReceiveScreen(
     nfcController: org.openbeam.nfc.NfcController
 ) {
     val context = LocalContext.current
-    val historyRepo = remember { org.openbeam.core.history.HistoryRepository.getInstance(context) }
+    val historyRepo = remember { HistoryRepository.getInstance(context) }
     var tokenReceived by remember { mutableStateOf<SessionToken?>(null) }
     var isReceiving by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf(0f) }
-    var metadata by remember { mutableStateOf<TransferMetadata?>(null) }
 
-    // Enable NFC read when composable enters
     DisposableEffect(Unit) {
         nfcController.enableRead { token ->
             tokenReceived = token
@@ -278,12 +246,9 @@ fun ReceiveScreen(
             Text("Aproxime o dispositivo emissor para ler o token.")
         } else {
             Text("Token recebido: ${tokenReceived!!.id}\nAguardando conexão...")
-            // Once token is received, create group and wait for connection
             LaunchedEffect(tokenReceived) {
-                // Become group owner to receive
                 transportManager.createWifiGroup()
                 isReceiving = true
-                // Wait for connection and receive data
                 transportManager.transfer(
                     role = WifiDirectTransport.Role.RECEIVER,
                     token = tokenReceived!!,
@@ -294,7 +259,6 @@ fun ReceiveScreen(
                     progress = if (total > 0) transferred.toFloat() / total else 0f
                 }
                 isReceiving = false
-                // After transfer, reset state
                 tokenReceived = null
             }
             if (isReceiving) {
@@ -310,7 +274,7 @@ fun ReceiveScreen(
 @Composable
 fun HistoryScreen(navController: NavHostController) {
     val context = LocalContext.current
-    val historyRepo = remember { org.openbeam.core.history.HistoryRepository.getInstance(context) }
+    val historyRepo = remember { HistoryRepository.getInstance(context) }
     val entries by historyRepo.getAllEntries().collectAsState(initial = emptyList())
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -319,7 +283,7 @@ fun HistoryScreen(navController: NavHostController) {
     ) {
         Text("Histórico de transferências")
         entries.forEach { entry ->
-            Text("${entry.direction.uppercase()}: ${entry.name} (${entry.size} bytes) em ${java.text.SimpleDateFormat("dd/MM/yyyy HH:mm").format(java.util.Date(entry.timestamp))}")
+            Text("${entry.direction.uppercase()}: ${entry.name} (${entry.size} bytes) em ${SimpleDateFormat("dd/MM/yyyy HH:mm").format(Date(entry.timestamp))}")
         }
         if (entries.isEmpty()) {
             Text("Sem histórico ainda.")
@@ -330,9 +294,6 @@ fun HistoryScreen(navController: NavHostController) {
     }
 }
 
-/**
- * Helper to get a displayable file name from a URI.
- */
 private fun getFileName(context: Context, uri: Uri): String {
     val cursor = context.contentResolver.query(uri, null, null, null, null)
     return cursor?.use {

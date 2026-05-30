@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,13 +22,8 @@ import org.openbeam.core.TransferMetadata
 import org.openbeam.core.history.HistoryRepository
 import java.io.InputStream
 import java.io.OutputStream
-import java.util.*
+import java.util.UUID
 
-/**
- * Implements Bluetooth classic transport for OpenBeam. This class discovers nearby devices,
- * establishes a connection via RFCOMM and transfers file(s) using the same protocol as
- * Wi‑Fi Direct.
- */
 class BluetoothTransport(private val context: Context) {
     private val adapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
     private val uuid: UUID = UUID.fromString("fa87c0d0-afac-11de-8a39-0800200c9a66")
@@ -37,7 +33,6 @@ class BluetoothTransport(private val context: Context) {
 
     private var receiver: BroadcastReceiver? = null
 
-    /** Registers broadcast receiver for discovery results. */
     fun registerReceiver() {
         if (receiver != null) return
         receiver = object : BroadcastReceiver() {
@@ -63,7 +58,6 @@ class BluetoothTransport(private val context: Context) {
         context.registerReceiver(receiver, filter)
     }
 
-    /** Unregisters broadcast receiver. */
     fun unregisterReceiver() {
         receiver?.let {
             try { context.unregisterReceiver(it) } catch (ignored: Exception) {}
@@ -71,7 +65,6 @@ class BluetoothTransport(private val context: Context) {
         receiver = null
     }
 
-    /** Starts discovery of nearby Bluetooth devices. */
     fun discoverDevices() {
         adapter?.takeIf { it.isEnabled }?.apply {
             if (isDiscovering) cancelDiscovery()
@@ -80,7 +73,6 @@ class BluetoothTransport(private val context: Context) {
         }
     }
 
-    /** Connects to the given device. */
     suspend fun connect(
         device: BluetoothDevice,
         role: Role,
@@ -143,9 +135,6 @@ class BluetoothTransport(private val context: Context) {
         }
     }
 
-    /**
-     * Writes handshake and file data to the output stream using the same protocol as Wi‑Fi Direct.
-     */
     private fun sendData(
         output: OutputStream,
         metadata: TransferMetadata,
@@ -185,9 +174,6 @@ class BluetoothTransport(private val context: Context) {
         }
     }
 
-    /**
-     * Reads handshake and file data from the input stream. Returns metadata and total bytes received.
-     */
     private fun receiveData(
         input: InputStream,
         token: SessionToken,

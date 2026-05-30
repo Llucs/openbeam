@@ -25,6 +25,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Accept Android SDK licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
       - name: Cache Gradle packages
         uses: actions/cache@v4
         with:
@@ -38,12 +41,10 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build
-        # O Gradle aceita assembleDebug ou assemblerelease, então manter o input maiúsculo aqui funciona
         run: ./gradlew app:assemble${{ inputs.buildType }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: OpenBeam-${{ inputs.buildType }}
-          # CORREÇÃO: Removemos o toLowerCase e usamos * para pegar a pasta independente se for 'debug' ou 'release'
           path: app/build/outputs/apk/**/*.apk

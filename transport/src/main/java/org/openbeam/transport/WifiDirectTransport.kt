@@ -13,43 +13,31 @@ import android.net.wifi.p2p.WpsInfo
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.openbeam.core.HandshakeManager
 import org.openbeam.core.SessionToken
 import org.openbeam.core.TransferMetadata
 import org.openbeam.core.history.HistoryRepository
 import java.io.File
-import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 
-/**
- * Provides a complete implementation of Wi‑Fi Direct transport for OpenBeam. This class
- * handles peer discovery, connection establishment, and bi‑directional data transfer using
- * TCP sockets. It must be registered and unregistered with the activity lifecycle.
- */
 class WifiDirectTransport(private val context: Context) {
     private val manager: WifiP2pManager = context.getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
-    private val channel: WifiP2pManager.Channel = manager.initialize(context, context.mainLooper, null)
+    private val channel: WifiP2pManager.Channel = manager.initialize(context, context.mainLooper, null)!!
 
-    // Flow of discovered peers. Updated whenever peers list changes.
     private val _peers = MutableStateFlow<List<WifiP2pDevice>>(emptyList())
     val peers: StateFlow<List<WifiP2pDevice>> = _peers.asStateFlow()
 
-    // Connection info flow. Emits when a connection is established or changed.
     private val _connectionInfo = MutableStateFlow<WifiP2pInfo?>(null)
     val connectionInfo: StateFlow<WifiP2pInfo?> = _connectionInfo.asStateFlow()
 
-    // Broadcast receiver for Wi‑Fi Direct events.
     private var receiver: BroadcastReceiver? = null
 
-    /**
-     * Registers the broadcast receiver. Should be called in Activity#onResume.
-     */
     fun registerReceiver() {
         if (receiver != null) return
         val filter = IntentFilter().apply {
@@ -86,9 +74,6 @@ class WifiDirectTransport(private val context: Context) {
         context.registerReceiver(receiver, filter)
     }
 
-    /**
-     * Unregisters the broadcast receiver. Should be called in Activity#onPause.
-     */
     fun unregisterReceiver() {
         receiver?.let {
             try {
@@ -99,10 +84,6 @@ class WifiDirectTransport(private val context: Context) {
         receiver = null
     }
 
-    /**
-     * Initiates discovery of nearby Wi‑Fi Direct peers. The result will be delivered via
-     * the [peers] StateFlow. If discovery fails, an error is logged.
-     */
     fun discoverPeers() {
         manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
@@ -114,9 +95,6 @@ class WifiDirectTransport(private val context: Context) {
         })
     }
 
-    /**
-     * Connects to the specified peer. On success, the connection info flow will be updated.
-     */
     fun connect(device: WifiP2pDevice) {
         val config = WifiP2pConfig().apply {
             deviceAddress = device.deviceAddress
@@ -132,10 +110,6 @@ class WifiDirectTransport(private val context: Context) {
         })
     }
 
-    /**
-     * Creates a Wi‑Fi Direct group. The device becomes the group owner, allowing other devices
-     * to connect without prior discovery. Useful for receive mode.
-     */
     fun createGroup() {
         manager.createGroup(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
@@ -147,14 +121,6 @@ class WifiDirectTransport(private val context: Context) {
         })
     }
 
-    /**
-     * Transfers file(s) between devices. The [role] parameter determines whether this device
-     * acts as the sender or receiver. Senders must provide metadata and a list of URIs; receivers
-     * will ignore these and instead save incoming files to the Downloads directory.
-     *
-     * Progress updates are delivered via the [updateProgress] callback, which receives the number
-     * of bytes transferred and the total expected size.
-     */
     suspend fun transfer(
         role: Role,
         token: SessionToken,
@@ -164,37 +130,25 @@ class WifiDirectTransport(private val context: Context) {
         updateProgress: (Long, Long) -> Unit
     ) {
         withContext(Dispatchers.IO) {
-            // Wait for connection info.
-            val info = connectionInfo.filterNotNull().first()
+            val info = withTimeoutOrNull(30000) { connectionInfo.filterNotNull().first() }
+                ?: throw IllegalStateException("Connection info not available within timeout")
             val isGroupOwner = info.isGroupOwner
-            val address = info.groupOwnerAddress.hostAddress
+            val address = info.groupOwnerAddress?.hostAddress
+                ?: throw IllegalStateException("No group owner address")
             Log.d("WifiDirectTransport", "Connected: groupOwner=$isGroupOwner, address=$address")
             if (role == Role.SENDER) {
-                // We always initiate sending regardless of group owner state. The server or client
-                // decision is based on the group ownership: group owner becomes server to accept
-                // connection from client.
                 if (isGroupOwner) {
-                    // Start a server socket and wait for the client to connect before sending.
                     ServerSocket(8988).use { serverSocket ->
-                        val socket = serverSocket.accept()
-                        socket.use { s ->
-                            val output = s.getOutputStream()
-                            val input = s.getInputStream()
-                            sendData(output, metadata!!, files, token, updateProgress)
-                            // Optionally read an acknowledgement from receiver (not used)
+                        serverSocket.accept().use { s ->
+                            sendData(s.getOutputStream(), metadata!!, files, token, updateProgress)
                         }
                     }
                 } else {
-                    // Connect to group owner and send.
-                    val socket = Socket()
-                    socket.bind(null)
-                    socket.connect(InetSocketAddress(address, 8988), 15000)
-                    socket.use { s ->
-                        val output = s.getOutputStream()
-                        sendData(output, metadata!!, files, token, updateProgress)
+                    Socket().use { s ->
+                        s.connect(InetSocketAddress(address, 8988), 15000)
+                        sendData(s.getOutputStream(), metadata!!, files, token, updateProgress)
                     }
                 }
-                // Record history entry after sending
                 val totalSize = metadata?.size ?: 0L
                 historyRepository.addEntry(
                     org.openbeam.core.history.HistoryEntry(
@@ -205,15 +159,10 @@ class WifiDirectTransport(private val context: Context) {
                     )
                 )
             } else {
-                // Receiver role: wait for data
                 if (isGroupOwner) {
-                    // As group owner, accept connection
                     ServerSocket(8988).use { serverSocket ->
-                        val socket = serverSocket.accept()
-                        socket.use { s ->
-                            val input = s.getInputStream()
-                            val (receivedMetadata, totalSize) = receiveData(input, token, updateProgress)
-                            // Save history
+                        serverSocket.accept().use { s ->
+                            val (receivedMetadata, totalSize) = receiveData(s.getInputStream(), token, updateProgress)
                             historyRepository.addEntry(
                                 org.openbeam.core.history.HistoryEntry(
                                     name = receivedMetadata.name,
@@ -225,13 +174,9 @@ class WifiDirectTransport(private val context: Context) {
                         }
                     }
                 } else {
-                    // Non-group owner: connect to group owner to receive.
-                    val socket = Socket()
-                    socket.bind(null)
-                    socket.connect(InetSocketAddress(address, 8988), 15000)
-                    socket.use { s ->
-                        val input = s.getInputStream()
-                        val (receivedMetadata, totalSize) = receiveData(input, token, updateProgress)
+                    Socket().use { s ->
+                        s.connect(InetSocketAddress(address, 8988), 15000)
+                        val (receivedMetadata, totalSize) = receiveData(s.getInputStream(), token, updateProgress)
                         historyRepository.addEntry(
                             org.openbeam.core.history.HistoryEntry(
                                 name = receivedMetadata.name,
@@ -246,10 +191,6 @@ class WifiDirectTransport(private val context: Context) {
         }
     }
 
-    /**
-     * Writes handshake and file data to the socket output stream. Uses a simple binary protocol
-     * described in the OpenBeam documentation.
-     */
     private fun sendData(
         output: OutputStream,
         metadata: TransferMetadata,
@@ -299,10 +240,6 @@ class WifiDirectTransport(private val context: Context) {
         }
     }
 
-    /**
-     * Reads handshake and file data from the socket input stream. Returns metadata and total bytes
-     * received. Files are saved to the external Downloads directory of the app.
-     */
     private fun receiveData(
         input: InputStream,
         token: SessionToken,
@@ -361,10 +298,6 @@ class WifiDirectTransport(private val context: Context) {
         return metadata to totalBytes
     }
 
-    /**
-     * Reads the given byte array fully from the InputStream. Throws if input does not have
-     * enough bytes.
-     */
     private fun InputStream.readFully(buffer: ByteArray) {
         var offset = 0
         while (offset < buffer.size) {
@@ -414,9 +347,6 @@ class WifiDirectTransport(private val context: Context) {
                 (bytes[7].toLong() and 0xFF)
     }
 
-    /**
-     * Retrieves the file name from the given URI.
-     */
     private fun getFileNameFromUri(uri: Uri): String {
         val cursor = context.contentResolver.query(uri, null, null, null, null)
         return cursor?.use {
@@ -427,9 +357,6 @@ class WifiDirectTransport(private val context: Context) {
         } ?: uri.lastPathSegment ?: "unknown"
     }
 
-    /**
-     * Retrieves the file size from the given URI. Returns 0 if unknown.
-     */
     private fun getFileSizeFromUri(uri: Uri): Long {
         val cursor = context.contentResolver.query(uri, null, null, null, null)
         return cursor?.use {
@@ -440,8 +367,5 @@ class WifiDirectTransport(private val context: Context) {
         } ?: 0L
     }
 
-    /**
-     * Represents the role of the device in a transfer.
-     */
     enum class Role { SENDER, RECEIVER }
 }
