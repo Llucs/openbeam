@@ -1,6 +1,7 @@
 package org.openbeam.ui
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Nfc
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
@@ -704,6 +706,7 @@ private fun HistoryItem(entry: HistoryEntry, dateFormat: SimpleDateFormat) {
 
 @Composable
 fun SettingsScreen(navController: NavHostController) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -733,6 +736,42 @@ fun SettingsScreen(navController: NavHostController) {
             )
         }
         Spacer(modifier = Modifier.weight(1f))
+        ElevatedCard(
+            onClick = {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Llucs/openbeam"))
+                context.startActivity(intent)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Code,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        "Código Fonte",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "github.com/Llucs/openbeam",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
         Button(
             onClick = { navController.popBackStack() },
             modifier = Modifier.fillMaxWidth()
