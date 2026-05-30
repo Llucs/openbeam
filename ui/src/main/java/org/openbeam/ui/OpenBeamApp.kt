@@ -313,4 +313,3 @@ private fun getFileSize(context: Context, uri: Uri): Long {
         } else 0L
     } ?: 0L
 }
-}
