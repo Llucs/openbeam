@@ -1,16 +1,17 @@
 package org.openbeam
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material.MaterialTheme
-import androidx.compose.material.Surface
 import androidx.core.content.ContextCompat
 import org.openbeam.ui.OpenBeamApp
+import org.openbeam.ui.theme.OpenBeamTheme
 
 class MainActivity : ComponentActivity() {
     private lateinit var transportManager: org.openbeam.transport.TransportManager
@@ -26,16 +27,21 @@ class MainActivity : ComponentActivity() {
         nfcController = org.openbeam.nfc.NfcController(this)
         requestPermissions()
         transportManager.registerReceivers()
+        val sharedUris = extractSharedUris(intent)
         setContent {
-            MaterialTheme {
-                Surface {
-                    OpenBeamApp(
-                        transportManager = transportManager,
-                        nfcController = nfcController
-                    )
-                }
+            OpenBeamTheme {
+                OpenBeamApp(
+                    transportManager = transportManager,
+                    nfcController = nfcController,
+                    sharedUris = sharedUris
+                )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
     }
 
     override fun onDestroy() {
@@ -45,13 +51,37 @@ class MainActivity : ComponentActivity() {
         nfcController.disableWrite()
     }
 
+    private fun extractSharedUris(intent: Intent?): List<Uri> {
+        if (intent?.action == Intent.ACTION_SEND && intent.type != null) {
+            val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                intent.getParcelableExtra(Intent.EXTRA_STREAM)
+            }
+            uri?.let { return listOf(it) }
+        }
+        if (intent?.action == Intent.ACTION_SEND_MULTIPLE && intent.type != null) {
+            val uris = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
+            }
+            uris?.let { return it.toList() }
+        }
+        return emptyList()
+    }
+
     private fun requestPermissions() {
         val permissions = mutableListOf(
             Manifest.permission.NFC,
             Manifest.permission.ACCESS_WIFI_STATE,
             Manifest.permission.CHANGE_WIFI_STATE,
-            Manifest.permission.INTERNET
+            Manifest.permission.INTERNET,
+            Manifest.permission.FOREGROUND_SERVICE
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
             permissions.add(Manifest.permission.BLUETOOTH_SCAN)
